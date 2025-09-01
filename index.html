@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nexus Core Demo</title>
+</head>
+<body>
+  <h1>Nexus Core Demo</h1>
+  <textarea id="prompt" rows="4" cols="50" placeholder="Enter prompt..."></textarea>
+  <button id="send">Send</button>
+  <pre id="output"></pre>
+  <script>
+    const RELAY_BASE_URL = ""; // use same-origin in production; localhost only when running locally
+
+    async function send() {
+      const prompt = document.getElementById("prompt").value;
+      const resp = await fetch(`${RELAY_BASE_URL}/chat`, {
+        method: "POST",
+        headers: {"content-type":"application/json"},
+        body: JSON.stringify({model: "tiiuae/falcon-7b-instruct", prompt})
+      });
+      const data = await resp.json();
+      document.getElementById("output").textContent = data.text || JSON.stringify(data);
+    }
+
+    document.getElementById("send").addEventListener("click", send);
+
+    async function health() {
+      try {
+        const resp = await fetch(`${RELAY_BASE_URL}/health`);
+        const data = await resp.json();
+        console.log("Health:", data);
+      } catch (err) {
+        console.error("Health check failed", err);
+      }
+    }
+    health();
+  </script>
+</body>
+</html>
