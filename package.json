@@ -1,0 +1,12 @@
+{
+  "name": "nexus-swarm",
+  "version": "1.0.0",
+  "description": "Nexus Core resilient build",
+  "main": "index.js",
+  "scripts": {
+    "test": "node test_nexus.js"
+  },
+  "dependencies": {
+    "jsdom": "^23.0.1"
+  }
+}
