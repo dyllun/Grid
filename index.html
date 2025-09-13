@@ -1,0 +1,733 @@
+<!doctype html>
+    <html lang="en">
+    <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+    <title>Nexus — Swarm Orchestrator (Unbounded)</title>
+    <style>
+      :root { color-scheme: dark; --bg:#0b0e12; --panel:#0f172a; --muted:#9aa4b2; --text:#e8eff7; --primary:#be185d; --border:#253045; --ok:#22c55e; --bad:#ef4444; --warn:#f59e0b; }
+      * { box-sizing:border-box; }
+      html, body { height:100%; }
+      body { margin:0; background:var(--bg); color:var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+      header { position:sticky; top:0; z-index:10; background:var(--bg); border-bottom:1px solid var(--border); }
+      .bar { display:flex; gap:8px; align-items:center; padding:10px 12px; flex-wrap:wrap; }
+      .title { font-weight:700; font-size:14px; margin-right:auto; display:flex; align-items:center; gap:10px; }
+      .pill { font-size:12px; border:1px solid var(--border); padding:4px 8px; border-radius:999px; color:var(--muted); }
+      input, textarea, select { background:#0b1220; color:var(--text); border:1px solid var(--border); border-radius:10px; padding:8px 10px; font:inherit; outline:none; }
+      input:focus, textarea:focus, select:focus { border-color:#3b82f6; }
+      button { background:var(--primary); color:#fff; border:none; border-radius:10px; padding:8px 12px; font:inherit; font-weight:600; }
+      button[disabled]{ opacity:.5; filter:saturate(.2); }
+      button.outline { background:transparent; border:1px solid var(--border); color:var(--text); }
+      button.outline:hover { background:#101624; }
+      button.ghost { background:transparent; color:var(--muted); border:none; }
+      .status { width:10px; height:10px; border-radius:999px; background:var(--bad); display:inline-block; }
+      .ok { background:var(--ok) !important; }
+      .grid { display:grid; grid-template-columns: 1fr; gap:12px; padding:12px; max-width:1200px; margin:0 auto; }
+      .chat { background:var(--panel); border:1px solid var(--border); border-radius:14px; display:flex; flex-direction:column; min-height:60vh; }
+      .msgs { flex:1; overflow:auto; padding:14px; display:flex; flex-direction:column; gap:10px; }
+      .row { display:flex; }
+      .bubble { max-width:95%; padding:12px 14px; border:1px solid var(--border); border-radius:14px; white-space:pre-wrap; word-wrap:break-word; line-height:1.45; }
+      .user { margin-left:auto; background:#16233a; border-color:#334155; }
+      .assistant { margin-right:auto; background:#0f172a; border-color:#253045; }
+      .system { margin:0 auto; color:#d8b4fe; border-color:#6b21a8; background:transparent; font-size:12px; }
+      .phase { margin:0 auto; color:#a3e635; background:transparent; border-color:#3f6212; font-size:12px; }
+      .meta { margin-top:6px; font-size:11px; color:var(--muted); }
+      .composer { border-top:1px solid var(--border); padding:10px; display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; }
+      .composer textarea { flex:1 1 240px; min-height:60px; max-height:40vh; resize:vertical; }
+      .side { display:flex; flex-direction:column; gap:12px; }
+      .card { background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:12px; }
+      .rowv { display:flex; gap:8px; align-items:center; }
+      .rowwrap { display:flex; flex-wrap:wrap; gap:8px; }
+      .label { font-size:12px; color:var(--muted); }
+      .log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; white-space:pre-wrap; background:#0b1220; border:1px dashed var(--border); padding:10px; border-radius:10px; max-height:220px; overflow:auto; }
+      .tests { display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:8px; }
+      .test { display:flex; align-items:center; gap:8px; background:#0b1220; border:1px solid var(--border); border-radius:10px; padding:8px; }
+      .test .dot { width:10px; height:10px; border-radius:999px; background:#334155; }
+      .test.ok .dot { background:var(--ok); }
+      code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      pre { background:#0b1220; border:1px solid var(--border); border-radius:10px; padding:10px; overflow:auto; }
+      .codebar { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; font-size:12px; color:var(--muted); }
+      .copybtn { background:transparent; color:#9fb3c8; border:1px solid var(--border); padding:2px 6px; border-radius:6px; }
+      @media (min-width: 1100px) { .grid { grid-template-columns: 1fr 380px; align-items:start; } }
+    </style>
+    </head>
+    <body>
+    <header>
+      <div class="bar">
+        <div class="title">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;background:var(--primary);"></span>
+          Nexus • Swarm Orchestrator
+          <span id="relayStatus" class="pill"><span id="statusDot" class="status"></span> RELAY: DISCONNECTED</span>
+        </div>
+        <input id="relayUrl" placeholder="https://<colab>.trycloudflare.com" style="min-width:260px;flex:1" />
+        <button class="outline" id="saveRelay">Save</button>
+        <button class="outline" id="selfTestBtn">Self-Test</button>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="chat" id="chatBox">
+        <div id="msgs" class="msgs"></div>
+        <div class="composer">
+          <textarea id="input" placeholder="Mission objective here. (Enter to send / Launch Mission for swarm)"></textarea>
+          <div class="rowwrap">
+            <button id="sendBtn" disabled>Send</button>
+            <button id="launchBtn" class="outline" disabled>Launch Mission</button>
+            <button id="stopBtn" class="outline" disabled>Stop</button>
+          </div>
+          <div class="rowwrap" style="margin-top:6px">
+            <label class="pill"><input id="autoToolToggle" type="checkbox" checked /> Auto-create tools</label>
+            <label class="pill"><input id="autoExpandToggle" type="checkbox" checked /> Auto-expand models</label>
+            <label class="pill"><input id="infiniteLoopToggle" type="checkbox" checked /> Infinite autonomy loop</label>
+            <label class="pill"><input id="coOrchestratorsToggle" type="checkbox" checked /> Allow co‑orchestrators</label>
+            <label class="pill"><input id="confirmImpossibleToggle" type="checkbox" checked /> Confirm before “impossible”</label>
+          </div>
+        </div>
+      </section>
+
+      <aside class="side">
+        <div class="card">
+          <div class="rowv" style="justify-content:space-between;">
+            <div class="label">System prompt (optional)</div>
+            <button class="ghost" id="newChat">New Chat</button>
+          </div>
+          <textarea id="systemPrompt" placeholder="Optional system instruction…" style="width:100%;min-height:80px"></textarea>
+          <div class="rowwrap">
+            <button class="outline" id="clearLog">Clear Log</button>
+            <span class="pill" id="capsBadge">caps: —</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="rowv" style="justify-content:space-between;align-items:center;">
+            <div class="label">System Self-Test (all green → buttons enable)</div>
+            <button class="ghost" id="runTests">Run</button>
+          </div>
+          <div id="tests" class="tests" style="margin-top:8px;">
+            <div class="test" data-test="health"><div class="dot"></div><span>/health</span></div>
+            <div class="test" data-test="chat"><div class="dot"></div><span>/chat</span></div>
+            <div class="test" data-test="embed"><div class="dot"></div><span>/embed</span></div>
+            <div class="test" data-test="rank"><div class="dot"></div><span>/rank</span></div>
+            <div class="test" data-test="search"><div class="dot"></div><span>/search</span></div>
+            <div class="test" data-test="exec"><div class="dot"></div><span>/exec</span></div>
+            <div class="test" data-test="browser"><div class="dot"></div><span>/browser</span></div>
+          </div>
+          <div class="label" style="margin-top:8px">Log</div>
+          <div id="log" class="log"></div>
+        </div>
+
+        <div class="card">
+          <div class="rowv" style="justify-content:space-between;">
+            <div class="label">Tool Registry</div>
+            <div class="rowwrap">
+              <button class="outline" id="genTool">AI → New Tool</button>
+              <button class="outline" id="runTool">Run Tool</button>
+            </div>
+          </div>
+          <div class="label">Installed tools</div>
+          <select id="toolList" style="width:100%"></select>
+          <div class="label" style="margin-top:8px;">Tool JSON (edit/save)</div>
+          <textarea id="toolJson" style="width:100%;min-height:140px" placeholder='{"name":"web_extract_h1","inputs":["url"],"plan":[{"endpoint":"/browser/run-adv","body":{"url":"${url}","actions":[{"type":"extract","selector":"h1","attr":"text"}]},"pick":"log[-1].value","as":"h1"}],"output":"${h1}"}'></textarea>
+          <div class="rowwrap">
+            <button class="outline" id="saveTool">Save Tool</button>
+            <button class="outline" id="deleteTool">Delete</button>
+            <button class="ghost" id="exportTools">Export</button>
+            <button class="ghost" id="importTools">Import</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="rowv" style="justify-content:space-between;align-items:center;">
+            <div class="label">Model Manager</div>
+          </div>
+          <div class="label" style="margin-top:6px;">Scout (Hugging Face)</div>
+          <div class="rowwrap">
+            <input id="mmQuery" placeholder="e.g. instruct 7B or coder" style="flex:1" />
+            <button class="outline" id="mmScout">Search</button>
+          </div>
+          <div id="mmResults" class="log" style="max-height:160px; overflow:auto"></div>
+          <div class="label" style="margin-top:8px;">Active pools</div>
+          <pre id="mmPools" class="log" style="max-height:180px; white-space:pre-wrap;"></pre>
+        </div>
+      </aside>
+    </main>
+
+    <script>
+    (() => {
+      // ---------------- STATE ----------------
+      const MODEL_POOLS = { REASONING: [], CODING: [], MATH: [] };
+      let RELAY = localStorage.getItem('NEXUS_RELAY') || '';
+      // Normalize user-pasted URL once
+      try { const u = new URL(RELAY); RELAY = u.href.replace(/\/+$/, ''); } catch {}
+      let CAPS = { chat:false, embed:false, rank:false, search:false, exec:false, browser:false };
+      let MESSAGES = [];
+      let BUSY = false;
+      let RUNNING_MISSION = false;
+      let AUTO_TOOL_CREATE = true;
+      let AUTO_EXPAND_MODELS = true;
+      let INFINITE_LOOP = true;
+      let ALLOW_CO = true;
+      let CONFIRM_IMPOSSIBLE = true;
+
+      const TOOL_BUILDER_MODELS = [
+        "Qwen/Qwen2.5-Coder-7B-Instruct",
+        "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct",
+        "mistralai/Mixtral-8x7B-Instruct-v0.1"
+      ];
+      const ALLOWED_ENDPOINTS = ["/chat","/embed","/rank","/search","/exec","/browser/run-adv"];
+
+      // ---------------- DOM -------------------
+      const el = (id) => document.getElementById(id);
+      const msgs = el('msgs'), logEl = el('log');
+      el('relayUrl').value = RELAY;
+      const statusDot = document.getElementById('statusDot');
+      const relayStatus = document.getElementById('relayStatus');
+
+      function setStatus(ok, msg) {
+        statusDot.classList.toggle('ok', !!ok);
+        relayStatus.textContent = 'RELAY: ' + (ok ? 'CONNECTED' : 'DISCONNECTED') + (msg ? ` — ${msg}` : '');
+      }
+      function addLog(line) {
+        const t = new Date().toLocaleTimeString();
+        logEl.textContent += `[${t}] ${line}\n`;
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+      function addMessage(role, text) {
+        const row = document.createElement('div'); row.className = 'row';
+        const b = document.createElement('div'); b.className = `bubble ${role}`;
+        b.innerHTML = renderMarkdown(text);
+        row.appendChild(b); msgs.appendChild(row);
+        const meta = document.createElement('div'); meta.className = 'meta';
+        meta.textContent = new Date().toLocaleString();
+        b.appendChild(meta);
+        msgs.scrollTop = msgs.scrollHeight;
+        MESSAGES.push({ role, text, when: Date.now() });
+        enhanceCodeBlocks(b);
+      }
+
+      // -------- Markdown-lite ----------
+      function escapeHtml(s){return s.replace(/[&<>"]'/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'': '&#39;' }[m]));}
+      function renderMarkdown(md) {
+        md = (md||'').toString();
+        md = md.replace(/```(\w+)?\n([\s\S]*?)```/g, (m,lang,code)=>{
+          const langLabel = lang ? `<span>${escapeHtml(lang)}</span>` : `<span>code</span>`;
+          return `<div class="codebar">${langLabel}<button class="copybtn" data-code="${encodeURIComponent(code)}">Copy</button></div><pre><code>${escapeHtml(code)}</code></pre>`;
+        });
+        md = md.replace(/`([^`]+?)`/g, (_,c)=>`<code>${escapeHtml(c)}</code>`);
+        md = md.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/\*([^*]+)\*/g,'<i>$1</i>');
+        md = md.split('\n').map(line=>{
+          if (line.trim().startsWith('- ')) return `<div>• ${escapeHtml(line.trim().slice(2))}</div>`;
+          return escapeHtml(line);
+        }).join('\n');
+        md = md.replace(/(https?:\/\/[^\s)]+)|(www\.[^\s)]+)/g, (u)=>`<a href="${u.startsWith('http')?u:'https://'+u}" target="_blank" rel="noopener">${u}</a>`);
+        return md;
+      }
+      function enhanceCodeBlocks(scope) {
+        scope.querySelectorAll('.copybtn').forEach(btn=>{
+          btn.onclick = () => {
+            const code = decodeURIComponent(btn.getAttribute('data-code') || '');
+            navigator.clipboard.writeText(code);
+            btn.textContent = 'Copied';
+            setTimeout(()=>btn.textContent='Copy', 1200);
+          };
+        });
+      }
+
+      // ---------- Math helpers (embeddings cosine) ----------
+      function cosine(a,b){ let s=0,n1=0,n2=0; const n=Math.min(a.length,b.length); for(let i=0;i<n;i++){const x=a[i],y=b[i]; s+=x*y; n1+=x*x; n2+=y*y;} return s/Math.max(1e-9, Math.sqrt(n1)*Math.sqrt(n2)); }
+
+      // ---------- Relay HTTP ----------
+      async function callRelay(endpoint, body) {
+        if (!RELAY) throw new Error('No Relay URL set');
+        const base = RELAY.replace(/\/+$/, '');
+        const path = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
+        const url  = base + path;
+        const t0 = performance.now();
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body || {})
+        });
+        const t1 = performance.now();
+        let data; try { data = await res.json(); } catch(e){ data = { error:'Invalid JSON from relay' }; }
+        addLog(`${res.ok?'✓':'✗'} POST ${path} (${Math.round(t1-t0)} ms) ${data.model?`model=${data.model}`:''}`);
+        if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+        return data;
+      }
+      async function getJSON(endpoint) {
+        if (!RELAY) throw new Error('No Relay URL set');
+        const base = RELAY.replace(/\/+$/, '');
+        const path = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
+        const url  = base + path;
+        const t0 = performance.now();
+        const res = await fetch(url, { headers: { 'accept': 'application/json' } });
+        const t1 = performance.now();
+        let data; try { data = await res.json(); } catch(e){ data = { error:'Invalid JSON' }; }
+        addLog(`${res.ok?'✓':'✗'} GET ${path} (${Math.round(t1-t0)} ms)`);
+        if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+        return data;
+      }
+
+      // ---------- Self-test ----------
+      const tests = {
+        async health(){ const d = await getJSON('/health'); return d.ok===true; },
+        async chat(){ const pools = await getJSON('/models/list'); const m = (pools.reason_pool||[])[0] || (pools.code_pool||[])[0]; const d = await callRelay('/chat', { model:m, prompt:'Say OK.', params:{ temperature:0.2, max_new_tokens:24 }}); return !!(d.text && d.text.length); },
+        async embed(){ const d = await callRelay('/embed', { texts:['a','b']}); return Array.isArray(d.vectors) && d.vectors.length===2 && Array.isArray(d.vectors[0]) && d.vectors[0].length>100; },
+        async rank(){ const d = await callRelay('/rank', { query:'test', candidates:['one','two']}); return Array.isArray(d.scores) && d.scores.length===2; },
+        async search(){ const d = await callRelay('/search', { query:'hello world', max_results:3}); return Array.isArray(d.results) && d.results.length>0; },
+        async exec(){ const d = await callRelay('/exec', { code:'1+2+3' }); return d.success===true && d.result===6; },
+        async browser(){ const d = await callRelay('/browser/run-adv', { url:'https://example.com', actions:[{type:'extract', selector:'h1', attr:'text'}], screenshots:true, timeout_ms:0 }); return d.ok===true && Array.isArray(d.screenshots) && d.screenshots.length>0; },
+      };
+      async function runSelfTest() {
+        document.querySelectorAll('.test').forEach(i=>i.classList.remove('ok','bad'));
+        el('sendBtn').disabled = true; el('launchBtn').disabled = true;
+        let allOk = true;
+        for (const key of ['health','chat','embed','rank','search','exec','browser']) {
+          const tEl = document.querySelector(`.test[data-test="${key}"]`);
+          try { const ok = await tests[key](); tEl.classList.add(ok?'ok':'bad'); allOk = allOk && ok; }
+          catch(e){ addLog(`✗ Test ${key} failed: ${e.message}`); tEl.classList.add('bad'); allOk=false; }
+        }
+        setStatus(allOk, allOk?'READY':'ISSUES');
+        el('sendBtn').disabled = !allOk; el('launchBtn').disabled = !allOk; el('stopBtn').disabled = !allOk;
+        try {
+          CAPS = await getJSON('/capabilities');
+          el('capsBadge').textContent = 'caps: ' + Object.keys(CAPS).filter(k=>CAPS[k]).join(',');
+        } catch {}
+        await refreshPoolsFromBackend();
+        return allOk;
+      }
+
+      // ---------- Chat ----------
+      function buildPrompt() {
+        const sys = (el('systemPrompt').value || '').trim();
+        const convo = MESSAGES.map(m => `${m.role==='user'?'User':m.role==='assistant'?'Assistant':'System'}: ${m.text}`).join('\n');
+        return (sys ? `System: ${sys}\n` : '') + convo + `\nAssistant:`;
+      }
+      async function typeAssistant(full) {
+        const chunk = 28; let out = '';
+        const row = document.createElement('div'); row.className = 'row';
+        const b = document.createElement('div'); b.className = 'bubble assistant'; b.innerHTML = '';
+        row.appendChild(b); msgs.appendChild(row); msgs.scrollTop = msgs.scrollHeight;
+        for (let i=0;i<full.length;i+=chunk) { out += full.slice(i, i+chunk); b.innerHTML = renderMarkdown(out); msgs.scrollTop = msgs.scrollHeight; await new Promise(r=>setTimeout(r, 12)); }
+        const meta = document.createElement('div'); meta.className = 'meta'; meta.textContent = new Date().toLocaleString(); b.appendChild(meta);
+        enhanceCodeBlocks(b); MESSAGES.push({ role:'assistant', text: full, when: Date.now() });
+      }
+      async function sendMessage() {
+        if (BUSY) return;
+        const text = el('input').value.trim(); if (!text) return;
+        el('input').value = ''; addMessage('user', text);
+        BUSY = true; el('sendBtn').disabled = true;
+        try {
+          const pools = await getJSON('/models/list');
+          const seed = (pools.reason_pool||[])[0] || (pools.code_pool||[])[0] || 'mistralai/Mixtral-8x7B-Instruct-v0.1';
+          const temp = 0.2;
+          const data = await callRelay('/chat', { model:seed, prompt: buildPrompt(), params:{ temperature: temp, max_new_tokens: 768 }});
+          await typeAssistant(data.text || '[no text]');
+        } catch(e) { addMessage('system', `Error: ${e.message}`); }
+        finally { BUSY = false; el('sendBtn').disabled = false; }
+      }
+
+      // ---------- Tools (registry + index) ----------
+      function loadTools(){ try { return JSON.parse(localStorage.getItem('NEXUS_TOOLS')||'{}'); } catch { return {}; } }
+      function saveTools(obj){ localStorage.setItem('NEXUS_TOOLS', JSON.stringify(obj, null, 2)); indexTools(obj).catch(()=>{}); refreshToolList(); }
+      function refreshToolList(){
+        const tools = loadTools(); const t = document.getElementById('toolList'); if (!t) return;
+        t.innerHTML=''; Object.keys(tools).sort().forEach(name=>{ const o=document.createElement('option'); o.value=name; o.textContent=name; t.appendChild(o); });
+        if (t.value) document.getElementById('toolJson').value = JSON.stringify(tools[t.value], null, 2);
+      }
+      function strTemplate(obj, ctx) {
+        const isObj = v => v && typeof v === 'object' && !Array.isArray(v);
+        if (typeof obj === 'string') return obj.replace(/\$\{([^}]+)\}/g, (_,k)=> (ctx[k.trim()] ?? ''));
+        if (Array.isArray(obj)) return obj.map(v=>strTemplate(v, ctx));
+        if (isObj(obj)) { const out={}; for (const k of Object.keys(obj)) out[k]=strTemplate(obj[k], ctx); return out; }
+        return obj;
+      }
+      function getByPath(obj, path) {
+        if (!path) return obj;
+        try { const parts = path.replace(/\[(\d+)\]/g, '.$1').split('.').filter(Boolean); let cur=obj; for (const p of parts) cur=cur?.[p]; return cur; } catch { return undefined; }
+      }
+      async function runPlan(plan, ctx) {
+        const outCtx = { ...ctx };
+        for (const step of plan) {
+          if (!ALLOWED_ENDPOINTS.includes(step.endpoint)) throw new Error('Disallowed endpoint '+step.endpoint);
+          const body = strTemplate(step.body || {}, outCtx);
+          const res = await callRelay(step.endpoint, body);
+          const picked = step.pick ? getByPath(res, step.pick) : res;
+          if (step.as) outCtx[step.as] = picked;
+        }
+        return outCtx;
+      }
+
+      // Embedding index for tools
+      async function embedOnce(text){ const r = await callRelay('/embed', { texts:[text] }); return r.vectors?.[0] || []; }
+      function loadToolIndex(){ try { return JSON.parse(localStorage.getItem('NEXUS_TOOL_INDEX')||'{}'); } catch { return {}; } }
+      function saveToolIndex(idx){ localStorage.setItem('NEXUS_TOOL_INDEX', JSON.stringify(idx)); }
+      async function indexTools(tools){
+        const idx = loadToolIndex();
+        for (const [name, tool] of Object.entries(tools)) {
+          const desc = tool.about || `${tool.name}: ${tool.inputs?.join(', ')} | steps:${(tool.plan||[]).map(s=>s.endpoint).join('→')} | output:${(tool.output||'')}`.slice(0,512);
+          if (!idx[name] || !Array.isArray(idx[name].vec)) {
+            try { idx[name] = { desc, vec: await embedOnce(desc) }; } catch {}
+          }
+        }
+        for (const k of Object.keys(idx)) if (!tools[k]) delete idx[k];
+        saveToolIndex(idx);
+      }
+      async function findMatchingTools(query, topK=3){
+        const qv = await embedOnce(query);
+        const idx = loadToolIndex();
+        const scored = Object.entries(idx).map(([name, {vec, desc}]) => ({ name, score: cosine(qv, vec||[]), desc }));
+        return scored.sort((a,b)=>b.score-a.score).filter(x=>x.score>0.35);
+      }
+
+      // Validation & publish
+      function validateToolSchema(t){
+        if (!t || typeof t !== 'object') return 'Not an object';
+        if (!t.name || typeof t.name !== 'string') return 'Missing "name"';
+        if (!Array.isArray(t.inputs)) t.inputs = [];
+        if (!Array.isArray(t.plan) || !t.plan.length) return 'Missing "plan[]"';
+        for (const step of t.plan) {
+          if (!ALLOWED_ENDPOINTS.includes(step.endpoint)) return `Disallowed endpoint: ${step.endpoint}`;
+          if (typeof step.body !== 'object') return 'Each step needs a "body" object';
+        }
+        if (typeof t.output !== 'string') t.output = '';
+        return null;
+      }
+      function uniquifyName(name){
+        const tools = loadTools();
+        if (!tools[name]) return name;
+        const stamp = new Date().toISOString().replace(/[-:.TZ]/g,'').slice(0,14);
+        return `${name}@${stamp}`;
+      }
+      async function dryRunTool(tool, args){
+        const ctx = { ...(args||{}) };
+        try {
+          for (const step of tool.plan) {
+            const body = strTemplate(step.body||{}, ctx);
+            const res = await callRelay(step.endpoint, body);
+            const picked = step.pick ? getByPath(res, step.pick) : res;
+            if (step.as) ctx[step.as] = picked;
+          }
+          const out = strTemplate(tool.output||'', ctx);
+          return { ok:true, output: out, ctx };
+        } catch(e) { return { ok:false, error: e.message }; }
+      }
+      function publishTool(tool){
+        const tools = loadTools();
+        const name = uniquifyName(tool.name);
+        tool.name = name; tools[name] = tool; saveTools(tools);
+        const list = document.getElementById('toolList'); if (list){ list.value = name; }
+        addMessage('system', `Auto-installed tool "${name}".`);
+        return name;
+      }
+      function compactToolJson(t){ try { return JSON.stringify(t); } catch { return ""; } }
+
+      // AI Tool creation (multi-model)
+      function toolBuilderSystemPrompt(){
+        return `You are a Tool Architect. Output ONLY JSON with schema:\n{\n  "name":"lower_snake_case",\n  "about":"short summary",\n  "inputs":["..."],\n  "plan":[{"endpoint":"/search|/chat|/embed|/rank|/exec|/browser/run-adv","body":{...},"pick":"a.b[0].c","as":"var"}],\n  "output":"string template with \${var}"\n}\nRules: use ONLY allowed endpoints. Keep plans concise (2–5 steps). Use \${var} placeholders from inputs or prior steps. No prose.`;
+      }
+      function toolBuilderUserPrompt(objective, subtaskBrief){
+        return `Build a tool for this subtask.\nObjective: ${objective}\nSubtask: ${subtaskBrief}\nReturn JSON only.`;
+      }
+      async function proposeTools(objective, subtaskBrief){
+        const sys = toolBuilderSystemPrompt();
+        const user = toolBuilderUserPrompt(objective, subtaskBrief);
+        const calls = TOOL_BUILDER_MODELS.map(m => callRelay('/chat', {
+          model:m,
+          prompt:`System: ${sys}\nUser: ${user}\nAssistant:`,
+          params:{ temperature:0.4, max_new_tokens:800 }
+        }).then(r=>r.text).catch(()=>null));
+        const raws = (await Promise.all(calls)).filter(Boolean);
+        const out = [];
+        for (const txt of raws) {
+          const m = txt.match(/\{[\s\S]*\}$/);
+          try { out.push(JSON.parse(m?m[0]:txt)); } catch {}
+        }
+        return out;
+      }
+      function scoreValidity(t){
+        let s=0; if (t && t.name) s+=0.2; if (Array.isArray(t.inputs)) s+=0.1;
+        if (Array.isArray(t.plan) && t.plan.length>0) s+=0.4; if (typeof t.output==='string') s+=0.2;
+        if ((t.plan||[]).every(p => ALLOWED_ENDPOINTS.includes(p.endpoint))) s+=0.1; return s;
+      }
+      async function pickBestTool(candidates, objective, brief){
+        if (!candidates.length) return null;
+        try {
+          const r = await callRelay('/rank', { query:`fitness for: ${brief}\nobjective:${objective}`, candidates: candidates.map(c=>compactToolJson(c)) });
+          const idx = (r.scores||[]).map((s,i)=>({i,s})).sort((a,b)=>b.s-a.s)[0]?.i ?? 0;
+          return candidates[idx];
+        } catch {
+          return candidates.sort((a,b)=>scoreValidity(b)-scoreValidity(a))[0];
+        }
+      }
+      async function inferArgsFor(tool, objective, subtask){
+        const args = {};
+        for (const k of (tool.inputs||[])) {
+          if (k.toLowerCase()==='url') {
+            const s = await callRelay('/search', { query: subtask.brief || objective, max_results:3 });
+            args[k] = s.results?.[0]?.url || '';
+          } else if (k.toLowerCase().includes('query')) {
+            args[k] = subtask.brief || objective;
+          } else {
+            const guess = await callRelay('/chat', {
+              model: (MODEL_POOLS.REASONING[0] || 'mistralai/Mixtral-8x7B-Instruct-v0.1'),
+              prompt:`Given objective "${objective}" and subtask "${subtask.brief}", propose JSON values for "${tool.name}" inputs ${JSON.stringify(tool.inputs)}. Only output JSON.`,
+              params:{ temperature:0.2, max_new_tokens:200 }
+            });
+            try { Object.assign(args, JSON.parse((guess.text.match(/\{[\s\S]*\}/)||[])[0] || guess.text)); }
+            catch { args[k] = ''; }
+          }
+        }
+        return args;
+      }
+      async function ensureToolAndRun(subtask, objective){
+        const hits = await findMatchingTools(subtask.brief || objective, 6);
+        if (hits.length) {
+          const tools = loadTools();
+          for (const h of hits) {
+            const t = tools[h.name]; if (!t) continue;
+            const args = await inferArgsFor(t, objective, subtask);
+            const run = await dryRunTool(t, args);
+            if (run.ok) return { toolName: h.name, output: run.output };
+          }
+        }
+        if (!AUTO_TOOL_CREATE) return { error: 'auto-create disabled' };
+        const drafts = await proposeTools(objective, subtask.brief || '');
+        const vetted  = drafts.map(d => (validateToolSchema(d) ? null : d)).filter(Boolean);
+        if (!vetted.length) return { error: 'no valid tool JSON from builders' };
+        const chosen = await pickBestTool(vetted, objective, subtask.brief || '');
+        if (!chosen) return { error: 'no chosen tool' };
+        const name = publishTool(chosen);
+        const args = await inferArgsFor(chosen, objective, subtask);
+        const run  = await dryRunTool(chosen, args);
+        if (!run.ok) return { error: 'run failed: '+run.error };
+        return { toolName: name, output: run.output };
+      }
+
+      // ---------- Mission runner (swarm + infinite autonomy) ----------
+      function addPhase(t){ addMessage('phase', t); }
+      async function seePhase(objective) {
+        addPhase('SEE: Inducing task spec');
+        const pools = await getJSON('/models/list');
+        const model = (pools.reason_pool||[])[0] || 'mistralai/Mixtral-8x7B-Instruct-v0.1';
+        const sys = `You are a master planner. Return STRICT JSON:\n{"io":{"inputs":[],"outputs":[]},"constraints":[],"eval":{"kind":"judge","sketch":["short bullet criteria"]},"subtasks":[{"id":"S1","type":"code|math|write|research|browse|tool","brief":"one sentence"}]}`;
+        const prompt = `Objective: ${objective}\nOnly return the JSON. Include "browse" for web actions, "tool" if an installed/created tool is appropriate.`;
+        const r = await callRelay('/chat',{ model, prompt:`System: ${sys}\nUser: ${prompt}\nAssistant:`, params:{temperature:0.1, max_new_tokens:1024 }});
+        const m = r.text.match(/\{[\s\S]*\}/); if (!m) throw new Error('No JSON spec');
+        const spec = JSON.parse(m[0]); addLog(`SEE: ${spec.subtasks?.length||0} subtasks`); return spec;
+      }
+      async function browserPlanFromBrief(brief) {
+        const pools = await getJSON('/models/list');
+        const model = (pools.reason_pool||[])[0] || 'mistralai/Mixtral-8x7B-Instruct-v0.1';
+        const sys = `Output ONLY JSON for /browser/run-adv body with keys: url, actions[], screenshots:true, timeout_ms. actions = [{type:"goto|fill|click|wait_for|extract", selector?, url?, value?, attr?}]. Keep minimal.`;
+        const r = await callRelay('/chat',{ model, prompt:`System:${sys}\nUser: Create a /browser/run-adv JSON body for: ${brief}\nAssistant:`, params:{temperature:0.2, max_new_tokens:512 }});
+        const m = r.text.match(/\{[\s\S]*\}$/); return JSON.parse(m?m[0]:r.text);
+      }
+      function bucketFor(type){
+        const t=(type||'').toLowerCase();
+        if (t.includes('code')) return MODEL_POOLS.CODING;
+        if (t.includes('math')) return MODEL_POOLS.MATH;
+        return MODEL_POOLS.REASONING;
+      }
+      async function swarmGenerate(subtask, objective) {
+        addPhase(`GENERATE: ${subtask.id} — ${subtask.brief}`);
+        const needsTool = (subtask.type||'').toLowerCase()==='tool' || /tool|compose|pipeline|crawl|scrape|extract|login|navigate|click|fill/i.test(subtask.brief||'');
+        if (needsTool) {
+          const r = await ensureToolAndRun(subtask, objective);
+          if (!r.error) return [{ id:`tool_${r.toolName}`, model:`tool:${r.toolName}`, solution:r.output, score: 100 }];
+          addLog('tool path failed → falling back to model generation: ' + r.error);
+        }
+        if ((subtask.type||'').toLowerCase()==='browse' || /open|click|fill|navigate|extract|scrape/i.test(subtask.brief||'')) {
+          const body = await browserPlanFromBrief(subtask.brief);
+          const run = await callRelay('/browser/run-adv', { ...body, timeout_ms: 0 });
+          const extracted = (run.log||[]).filter(e=>e.event==='extract').map(e=>e.value).join('\n');
+          return [{ id:`browse_${subtask.id}`, model:'browser', solution: extracted || (run.html? run.html.slice(0,2000):'') }];
+        }
+        const pool = bucketFor(subtask.type||'');
+        const temps = [0.2, 0.6, 0.9];
+        const calls = [];
+        for (const m of pool) for (const t of temps) {
+          const p = `Overall Objective: "${objective}"\nCurrent Subtask: "${subtask.brief}"\nReturn ONLY the direct artifact/answer for this subtask.`;
+          calls.push(callRelay('/chat',{ model:m, prompt:p, params:{ temperature:t, max_new_tokens: 1024 }})
+            .then(r=>({ id:`${m}@${t}`.replace(/[^a-z0-9._-]/gi,'_'), model:m, temperature:t, solution:r.text }))
+            .catch(()=>null));
+        }
+        let cands = (await Promise.all(calls)).filter(Boolean).filter(c => (c.solution||'').trim().length>0);
+        if (cands.length >= 3) {
+          try {
+            const ranked = await callRelay('/rank', { query: subtask.brief, candidates: cands.map(c=>c.solution) });
+            cands = cands.map((c,i)=>({ ...c, r: ranked.scores?.[i] ?? 0 })).sort((a,b)=> (b.r||0) - (a.r||0));
+          } catch {}
+        }
+        return cands;
+      }
+      async function verifyCandidate(candidate, subtask, evalSpec) {
+        const rubric = (evalSpec?.sketch||[]).join('\n');
+        const pools = await getJSON('/models/list');
+        const judge = (pools.reason_pool||[])[0] || 'mistralai/Mixtral-8x7B-Instruct-v0.1';
+        const jprompt = `You are a strict verification judge.\nSubtask: "${subtask.brief}"\nEvaluation criteria:\n${rubric}\nCandidate solution:\n---\n${candidate.solution}\n---\nRespond ONLY JSON: {"is_ok":bool,"score":0-100,"faults":["..."]}`;
+        const r = await callRelay('/chat', { model: judge, prompt:jprompt, params:{ temperature:0.0, max_new_tokens:256 } });
+        const m = r.text.match(/\{[\s\S]*\}/);
+        try { const j = JSON.parse(m?m[0]:r.text); return { ...candidate, isWinner: j.is_ok && j.score>80, score: j.score||0, faults: j.faults||[] }; }
+        catch { return { ...candidate, isWinner:false, score:0, faults:['judge-parse-failed'] }; }
+      }
+      async function refineCandidate(candidate, subtask) {
+        const pools = await getJSON('/models/list');
+        const refiner = candidate.model || (pools.reason_pool||[])[0] || 'mistralai/Mixtral-8x7B-Instruct-v0.1';
+        const p = `Refine the prior solution for: "${subtask.brief}".\nFaults:\n- ${(candidate.faults||[]).join('\n- ')}\nPrevious solution:\n---\n${candidate.solution}\n---\nReturn the improved, complete solution only.`;
+        const r = await callRelay('/chat', { model: refiner, prompt:p, params:{ temperature:0.4, max_new_tokens: 1024 }});
+        return { ...candidate, id: candidate.id+'_refined', solution: r.text };
+      }
+      async function fusePhase(results, objective) {
+        addPhase('FUSE: Synthesizing final answer');
+        const pools = await getJSON('/models/list');
+        const model = (pools.reason_pool||[])[0] || 'mistralai/Mixtral-8x7B-Instruct-v0.1';
+        const ctx = JSON.stringify(results, null, 2);
+        const p = `All subtasks are complete.\nObjective: "${objective}"\nSubtask results:\n${ctx}\nProvide the final, polished answer only.`;
+        const r = await callRelay('/chat', { model, prompt:p, params:{ temperature:0.2, max_new_tokens: 2048 }});
+        return r.text;
+      }
+      async function expandModelsIfNeeded(brief) {
+        if (!AUTO_EXPAND_MODELS) return false;
+        addPhase(`MODEL-SCOUT: expanding pools…`);
+        const q = `${brief} instruct`;
+        const res = await callRelay('/models/search', { query: q, limit: 15, role: "reason" }).catch(()=>({ok_candidates:[]}));
+        const ok = (res.ok_candidates||[]);
+        let added = 0; for (const c of ok){ try { await callRelay('/models/add', { role:"reason", model:c.model, skip_probe:true }); added++; } catch {} }
+        await refreshPoolsFromBackend(); return added>0;
+      }
+      async function runMission() {
+        if (BUSY || RUNNING_MISSION) return;
+        const objective = (el('input').value || '').trim();
+        if (!objective) return alert('Enter an objective in the message box first.');
+        RUNNING_MISSION = true; el('launchBtn').disabled = true; addPhase('MISSION: start');
+        let iteration = 0;
+        try {
+          while (RUNNING_MISSION) {
+            iteration++; addPhase(`LOOP #${iteration}`);
+            const spec = await seePhase(objective);
+            if (!spec?.subtasks?.length) { addMessage('system','Spec induction failed.'); if (!INFINITE_LOOP) break; else { await expandModelsIfNeeded(objective); continue; } }
+            const results = {};
+            for (const st of spec.subtasks) {
+              addPhase(`SUBTASK ${st.id}`);
+              let cands = await swarmGenerate(st, objective);
+              if (!cands.length) { results[st.id] = { error:'no candidates' }; continue; }
+              const ver = await Promise.all(cands.map(c=>verifyCandidate(c, st, spec.eval)));
+              let winner = ver.find(v=>v.isWinner);
+              if (!winner) {
+                const top = ver.sort((a,b)=>b.score-a.score)[0];
+                if (top) {
+                  const ref = await refineCandidate(top, st);
+                  const ver2 = await verifyCandidate(ref, st, spec.eval);
+                  winner = ver2.isWinner ? ver2 : null;
+                }
+              }
+              if (!winner && AUTO_TOOL_CREATE) {
+                addPhase(`AUTO-TOOL: synthesizing for ${st.id}`);
+                const r = await ensureToolAndRun(st, objective);
+                if (!r.error) winner = { id:`tool_${st.id}`, model:`tool:${r.toolName}`, solution: r.output, score: 100, isWinner: true };
+                else addLog('auto-tool synthesis failed: ' + r.error);
+              }
+              if (!winner) {
+                await expandModelsIfNeeded(st.brief || objective);
+                const retry = await swarmGenerate(st, objective);
+                const verR = await Promise.all(retry.map(c=>verifyCandidate(c, st, spec.eval)));
+                winner = verR.sort((a,b)=>b.score-a-score)[0];
+              }
+              results[st.id] = winner?.solution || '[no candidate]'; addPhase(`✔ SUBTASK ${st.id} winner`);
+              if (!RUNNING_MISSION) break;
+            }
+            const final = await fusePhase(results, objective);
+            addMessage('assistant', final);
+            const pools = await getJSON('/models/list');
+            const judge = (pools.reason_pool||[])[0] || 'mistralai/Mixtral-8x7B-Instruct-v0.1';
+            const j = await callRelay('/chat', { model: judge, prompt:`Did the above answer fully satisfy the objective "${objective}"? Respond ONLY JSON like {"ok":true|false,"why":"..."}.\n\nAnswer:\n${final}`, params:{temperature:0.0, max_new_tokens:128}});
+            const mj = (j.text.match(/\{[\s\S]*\}/)||[])[0]; let jo={ok:false,why:""}; try{ jo=JSON.parse(mj);}catch{}
+            if (jo.ok) { addPhase('MISSION: success'); break; }
+            if (CONFIRM_IMPOSSIBLE) {
+              const yn = confirm(`Judge says not yet satisfied. Continue? (Cancel to stop)`);
+              if (!yn) { addPhase('MISSION: stopped by operator'); break; }
+            }
+            await expandModelsIfNeeded(objective);
+            if (!INFINITE_LOOP) break;
+          }
+        } catch(e) {
+          addMessage('system', 'Mission error: ' + e.message);
+        } finally { RUNNING_MISSION=false; el('launchBtn').disabled=false; }
+      }
+
+      // --------- Model Manager (pools + scouting) ---------
+      async function refreshPoolsFromBackend() {
+        try {
+          const reg = await getJSON('/models/list');
+          MODEL_POOLS.REASONING = reg.reason_pool || MODEL_POOLS.REASONING;
+          MODEL_POOLS.CODING    = reg.code_pool    || MODEL_POOLS.CODING;
+          MODEL_POOLS.MATH      = reg.math_pool    || MODEL_POOLS.MATH;
+          const mmPools = document.getElementById('mmPools');
+          if (mmPools) mmPools.textContent = JSON.stringify(reg, null, 2);
+        } catch (e) { addLog('Failed to fetch /models/list: '+e.message); }
+      }
+      async function scoutModels(query, role) {
+        const box = document.getElementById('mmResults'); box.textContent = 'Searching…';
+        const r = await callRelay('/models/search', { query, limit: 15, role }).catch(()=>({candidates:[],ok_candidates:[]}));
+        const ok = r.ok_candidates || []; const all = r.candidates || [];
+        const lines = [];
+        lines.push(`Top OK (${ok.length}):`);
+        ok.slice(0,20).forEach(c=>lines.push(`  ✓ ${c.model} (${c.latency_ms||'?'} ms)`));
+        lines.push(''); lines.push(`All (${all.length}):`);
+        all.slice(0,25).forEach(c=>lines.push(`  ${c.ok?'✓':'✗'} ${c.model}  dl=${c.downloads||'?'} like=${c.likes||'?'} ${c.ok?`(${c.latency_ms||'?'} ms)`:''}`));
+        lines.push(''); lines.push('Tip: click a model line to add it.');
+        box.textContent = lines.join('\n');
+        box.onclick = async (ev)=>{ const text = ev.target?.innerText||''; const m = text.match(/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/); if (m) { try { await callRelay('/models/add', { role: role||'reason', model: m[1], skip_probe: true }); await refreshPoolsFromBackend(); } catch(e){ addMessage('system','Add failed: '+e.message);} } };
+      }
+
+      // ------ UI bindings + init ------
+      async function checkHealth() {
+        try { const d = await getJSON('/health'); setStatus(d.ok===true, d.ok?'OK':'ERR'); }
+        catch { setStatus(false); }
+      }
+      el('saveRelay').onclick = async () => {
+        RELAY = (el('relayUrl').value || '').trim();
+        // Normalize user-pasted URL once
+        try { const u = new URL(RELAY); RELAY = u.href.replace(/\/+$/, ''); } catch {}
+        localStorage.setItem('NEXUS_RELAY', RELAY);
+        addLog('Relay URL saved: '+RELAY);
+        await checkHealth(); await refreshPoolsFromBackend();
+      };
+      el('selfTestBtn').onclick = runSelfTest;
+      el('runTests').onclick = runSelfTest;
+      el('sendBtn').onclick = sendMessage;
+      el('launchBtn').onclick = runMission;
+      el('stopBtn').onclick = () => { RUNNING_MISSION = false; addPhase('MISSION: stop requested'); };
+      el('input').addEventListener('keydown', (e)=>{ if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }});
+      el('newChat').onclick = () => { MESSAGES=[]; msgs.innerHTML=''; addMessage('system','New chat started.'); };
+      el('clearLog').onclick = () => { logEl.textContent=''; };
+      // Tools UI
+      el('toolList').onchange = () => { const tools=loadTools(); el('toolJson').value = JSON.stringify(tools[el('toolList').value], null, 2); };
+      el('saveTool').onclick = () => { try { const t = JSON.parse(el('toolJson').value); if (!t.name) throw new Error('Tool needs "name"'); const all=loadTools(); all[t.name]=t; saveTools(all); el('toolList').value=t.name; addMessage('system', `Saved tool "${t.name}".`); } catch(e){ alert('Invalid JSON: '+e.message); } };
+      el('deleteTool').onclick = () => { const name=el('toolList').value; if (!name) return; const all=loadTools(); delete all[name]; saveTools(all); el('toolJson').value=''; addMessage('system', `Deleted tool "${name}".`); };
+      el('exportTools').onclick = () => { const blob = new Blob([JSON.stringify(loadTools(), null, 2)], {type:'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download='nexus_tools.json'; a.click(); URL.revokeObjectURL(url); };
+      el('importTools').onclick = () => { const i=document.createElement('input'); i.type='file'; i.accept='application/json'; i.onchange=async()=>{ const f=i.files[0]; const txt=await f.text(); const obj=JSON.parse(txt); saveTools(obj); addMessage('system','Imported tools.'); }; i.click(); };
+      // Toggles
+      const autoToolCB = document.getElementById('autoToolToggle');
+      const autoExpandCB = document.getElementById('autoExpandToggle');
+      const infiniteCB = document.getElementById('infiniteLoopToggle');
+      const coCB = document.getElementById('coOrchestratorsToggle');
+      const confirmCB = document.getElementById('confirmImpossibleToggle');
+      AUTO_TOOL_CREATE = !!autoToolCB.checked; autoToolCB.onchange = ()=> AUTO_TOOL_CREATE = !!autoToolCB.checked;
+      AUTO_EXPAND_MODELS = !!autoExpandCB.checked; autoExpandCB.onchange = ()=> AUTO_EXPAND_MODELS = !!autoExpandCB.checked;
+      INFINITE_LOOP = !!infiniteCB.checked; infiniteCB.onchange = ()=> INFINITE_LOOP = !!infiniteCB.checked;
+      ALLOW_CO = !!coCB.checked; coCB.onchange = ()=> ALLOW_CO = !!coCB.checked;
+      CONFIRM_IMPOSSIBLE = !!confirmCB.checked; confirmCB.onchange = ()=> CONFIRM_IMPOSSIBLE = !!confirmCB.checked;
+      // Init
+      (async function init(){
+        const sys = localStorage.getItem('NEXUS_SYS') || '';
+        el('systemPrompt').value = sys;
+        el('systemPrompt').addEventListener('input', ()=>localStorage.setItem('NEXUS_SYS', el('systemPrompt').value));
+        if (RELAY) { await checkHealth(); await refreshPoolsFromBackend(); }
+        addMessage('system', 'Paste the Colab PUBLIC_URL into “Relay URL”, press Self-Test, then Launch Mission. Swarm orchestration + infinite autonomy are enabled by default.');
+      })();
+    })();
+    </script>
+    </body>
+    </html>
