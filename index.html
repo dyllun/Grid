@@ -157,6 +157,11 @@
       // ---------------- STATE ----------------
       const MODEL_POOLS = { REASONING: [], CODING: [], MATH: [] };
       let RELAY = localStorage.getItem('NEXUS_RELAY') || '';
+
+      // Normalize user-pasted URL once
+      try { const u = new URL(RELAY); RELAY = u.href.replace(/\/+$/, ''); } catch {}
+
+
       let CAPS = { chat:false, embed:false, rank:false, search:false, exec:false, browser:false };
       let MESSAGES = [];
       let BUSY = false;
@@ -204,7 +209,13 @@
       }
 
       // -------- Markdown-lite ----------
+
+      function escapeHtml(s){
+        return s.replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;' }[m]));
+      }
+
       function escapeHtml(s){return s.replace(/[&<>"]'/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'': '&#39;' }[m]));}
+
       function renderMarkdown(md) {
         md = (md||'').toString();
         md = md.replace(/```(\w+)?\n([\s\S]*?)```/g, (m,lang,code)=>{
@@ -237,23 +248,49 @@
       // ---------- Relay HTTP ----------
       async function callRelay(endpoint, body) {
         if (!RELAY) throw new Error('No Relay URL set');
+
+        const base = RELAY.replace(/\/+$/, '');
+        const path = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
+        const url  = base + path;
+        const t0 = performance.now();
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body || {})
+        });
+        const t1 = performance.now();
+        let data; try { data = await res.json(); } catch(e){ data = { error:'Invalid JSON from relay' }; }
+        addLog(`${res.ok?'✓':'✗'} POST ${path} (${Math.round(t1-t0)} ms) ${data.model?`model=${data.model}`:''}`);
+
         const url = RELAY.replace(/\/+/,'') + endpoint;
         const t0 = performance.now();
         const res = await fetch(url, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(body||{}) });
         const t1 = performance.now();
         let data; try { data = await res.json(); } catch(e){ data = { error:'Invalid JSON from relay' }; }
         addLog(`${res.ok?'✓':'✗'} POST ${endpoint} (${Math.round(t1-t0)} ms) ${data.model?`model=${data.model}`:''}`);
+
         if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
         return data;
       }
       async function getJSON(endpoint) {
         if (!RELAY) throw new Error('No Relay URL set');
+
+        const base = RELAY.replace(/\/+$/, '');
+        const path = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
+        const url  = base + path;
+        const t0 = performance.now();
+        const res = await fetch(url, { headers: { 'accept': 'application/json' } });
+        const t1 = performance.now();
+        let data; try { data = await res.json(); } catch(e){ data = { error:'Invalid JSON' }; }
+        addLog(`${res.ok?'✓':'✗'} GET ${path} (${Math.round(t1-t0)} ms)`);
+
         const url = RELAY.replace(/\/+/,'') + endpoint;
         const t0 = performance.now();
         const res = await fetch(url);
         const t1 = performance.now();
         let data; try { data = await res.json(); } catch(e){ data = { error:'Invalid JSON' }; }
         addLog(`${res.ok?'✓':'✗'} GET ${endpoint} (${Math.round(t1-t0)} ms)`);
+
         if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
         return data;
       }
@@ -678,6 +715,12 @@
       }
       el('saveRelay').onclick = async () => {
         RELAY = (el('relayUrl').value || '').trim();
+
+        // Normalize user-pasted URL once
+        try { const u = new URL(RELAY); RELAY = u.href.replace(/\/+$/, ''); } catch {}
+        el('relayUrl').value = RELAY;
+
+
         localStorage.setItem('NEXUS_RELAY', RELAY);
         addLog('Relay URL saved: '+RELAY);
         await checkHealth(); await refreshPoolsFromBackend();
