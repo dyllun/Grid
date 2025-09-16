@@ -373,6 +373,7 @@ def start_cloudflared(port=PORT, max_wait=60):
             raise TimeoutError("Timed out waiting for cloudflared URL")
     return proc, url
 
+
 def keep_alive(interval=600):
     while True:
         try:
@@ -382,12 +383,17 @@ def keep_alive(interval=600):
             pass
         time.sleep(interval)
 
+
+
 if __name__ == "__main__":
     flask_thread = threading.Thread(target=run_app, daemon=True)
     flask_thread.start()
     try:
         CF_PROC, PUBLIC_URL = start_cloudflared(PORT)
+
         threading.Thread(target=keep_alive, daemon=True).start()
+
+
         print("\n" + "="*56)
         print("✅ NEXUS CORE BACKEND LIVE")
         print(f"🔗 Public URL: {PUBLIC_URL}")
